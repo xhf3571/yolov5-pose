@@ -160,14 +160,45 @@ class ComputeLoss:
                     pkpt_score = ps[:, 8::3]
                     #mask
                     kpt_mask = (tkpt[i][:, 0::2] != 0)
+                    
+                    # 确保pkpt_score和kpt_mask形状匹配
+                    if pkpt_score.shape[1] != kpt_mask.shape[1]:
+                        print(f"形状不匹配: pkpt_score: {pkpt_score.shape}, kpt_mask: {kpt_mask.shape}")
+                        # 如果pkpt_score比kpt_mask大，截断pkpt_score
+                        if pkpt_score.shape[1] > kpt_mask.shape[1]:
+                            pkpt_score = pkpt_score[:, :kpt_mask.shape[1]]
+                        # 如果kpt_mask比pkpt_score大，截断kpt_mask
+                        else:
+                            kpt_mask = kpt_mask[:, :pkpt_score.shape[1]]
+                    
                     lkptv += self.BCEcls(pkpt_score, kpt_mask.float()) 
                     #l2 distance based loss
                     #lkpt += (((pkpt-tkpt[i])*kpt_mask)**2).mean()  #Try to make this loss based on distance instead of ordinary difference
                     #oks based loss
-                    d = (pkpt_x-tkpt[i][:,0::2])**2 + (pkpt_y-tkpt[i][:,1::2])**2
+                    # 确保形状匹配
+                    if pkpt_x.shape[1] != tkpt[i][:,0::2].shape[1]:
+                        print(f"形状不匹配: pkpt_x: {pkpt_x.shape}, tkpt: {tkpt[i][:,0::2].shape}")
+                        min_kpts = min(pkpt_x.shape[1], tkpt[i][:,0::2].shape[1])
+                        pkpt_x = pkpt_x[:, :min_kpts]
+                        pkpt_y = pkpt_y[:, :min_kpts]
+                        kpt_mask = kpt_mask[:, :min_kpts]
+                    
+                    d = (pkpt_x-tkpt[i][:,0::2][:,:pkpt_x.shape[1]])**2 + (pkpt_y-tkpt[i][:,1::2][:,:pkpt_y.shape[1]])**2
                     s = torch.prod(tbox[i][:,-2:], dim=1, keepdim=True)
-                    kpt_loss_factor = (torch.sum(kpt_mask != 0) + torch.sum(kpt_mask == 0))/torch.sum(kpt_mask != 0)
-                    lkpt += kpt_loss_factor*((1 - torch.exp(-d/(s*(4*sigmas**2)+1e-9)))*kpt_mask).mean()
+                    
+                    # 确保sigmas长度匹配
+                    if sigmas.shape[0] != pkpt_x.shape[1]:
+                        print(f"sigmas形状不匹配: sigmas: {sigmas.shape}, pkpt_x: {pkpt_x.shape[1]}")
+                        if sigmas.shape[0] > pkpt_x.shape[1]:
+                            sigmas_used = sigmas[:pkpt_x.shape[1]]
+                        else:
+                            # 如果sigmas不够，重复使用最后一个值
+                            sigmas_used = torch.cat([sigmas, sigmas[-1].repeat(pkpt_x.shape[1] - sigmas.shape[0])])
+                    else:
+                        sigmas_used = sigmas
+                    
+                    kpt_loss_factor = (torch.sum(kpt_mask != 0) + torch.sum(kpt_mask == 0))/torch.sum(kpt_mask != 0).clamp(min=1)
+                    lkpt += kpt_loss_factor*((1 - torch.exp(-d/(s*(4*sigmas_used**2).unsqueeze(0)+1e-9)))*kpt_mask).mean()
                 # Objectness
                 tobj[b, a, gj, gi] = (1.0 - self.gr) + self.gr * iou.detach().clamp(0).type(tobj.dtype)  # iou ratio
 
