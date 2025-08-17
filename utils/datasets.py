@@ -671,9 +671,19 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     labels[:, 1] = 1 - labels[:, 1]
                     if self.kpt_label:
                         labels[:, 5::2] = (1 - labels[:, 5::2])*(labels[:, 5::2]!=0)
-                        # 直接应用CrowdPose的flip_index进行关键点翻转
-                        labels[:, 5::2] = labels[:, 5::2][:, self.flip_index]
-                        labels[:, 6::2] = labels[:, 6::2][:, self.flip_index]
+                        # 直接应用flip_index进行关键点翻转，但要确保形状匹配
+                        # 计算关键点数量
+                        num_kpts = min(len(self.flip_index), (labels.shape[1] - 5) // 2)
+                        # 只翻转实际存在的关键点
+                        for k in range(num_kpts):
+                            if self.flip_index[k] < num_kpts:
+                                tmp = labels[:, 5 + k*2].copy()
+                                labels[:, 5 + k*2] = labels[:, 5 + self.flip_index[k]*2]
+                                labels[:, 5 + self.flip_index[k]*2] = tmp
+                                
+                                tmp = labels[:, 6 + k*2].copy()
+                                labels[:, 6 + k*2] = labels[:, 6 + self.flip_index[k]*2]
+                                labels[:, 6 + self.flip_index[k]*2] = tmp
 
         # 使用类中定义的关键点数量
         labels_out = torch.zeros((nL, 6+2*self.num_kpts)) if self.kpt_label else torch.zeros((nL, 6))
