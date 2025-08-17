@@ -117,17 +117,10 @@ class ComputeLoss:
         device = targets.device
         lcls, lbox, lobj, lkpt, lkptv = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
         
-        # 根据关键点数量选择不同的sigmas
-        if self.nkpt == 17:  # COCO
-            sigmas = torch.tensor([.26, .25, .25, .35, .35, .79, .79, .72, .72, .62, .62, 1.07, 1.07, .87, .87, .89, .89], device=device) / 10.0
-        elif self.nkpt == 14:  # CrowdPose
-            # CrowdPose关键点定义：0-left_shoulder, 1-right_shoulder, 2-left_elbow, 3-right_elbow, 4-left_wrist, 
-            # 5-right_wrist, 6-left_hip, 7-right_hip, 8-left_knee, 9-right_knee, 10-left_ankle, 11-right_ankle, 
-            # 12-head, 13-neck
-            sigmas = torch.tensor([.79, .79, .72, .72, .62, .62, 1.07, 1.07, .87, .87, .89, .89, .25, .25], device=device) / 10.0
-        else:
-            # 默认情况，创建一个全为0.5的sigmas数组
-            sigmas = torch.ones(self.nkpt, device=device) * 0.5 / 10.0
+        # CrowdPose关键点定义：0-left_shoulder, 1-right_shoulder, 2-left_elbow, 3-right_elbow, 4-left_wrist, 
+        # 5-right_wrist, 6-left_hip, 7-right_hip, 8-left_knee, 9-right_knee, 10-left_ankle, 11-right_ankle, 
+        # 12-head, 13-neck
+        sigmas = torch.tensor([.79, .79, .72, .72, .62, .62, 1.07, 1.07, .87, .87, .89, .89, .25, .25], device=device) / 10.0
             
         tcls, tbox, tkpt, indices, anchors = self.build_targets(p, targets)  # targets
 
@@ -196,36 +189,11 @@ class ComputeLoss:
         na, nt = self.na, targets.shape[0]  # number of anchors, targets
         tcls, tbox, tkpt, indices, anch = [], [], [], [], []
         if self.kpt_label:
-            # 根据关键点数量调整gain数组大小
-            if self.nkpt == 17:  # COCO
-                gain = torch.ones(41, device=targets.device)  # normalized to gridspace gain (5 + 17*2 + 2)
-            elif self.nkpt == 14:  # CrowdPose
-                gain = torch.ones(35, device=targets.device)  # normalized to gridspace gain (5 + 14*2 + 2)
-            else:
-                gain = torch.ones(5 + self.nkpt*2 + 2, device=targets.device)  # 通用情况
+            # 只考虑CrowdPose数据集的14个关键点
+            gain = torch.ones(35, device=targets.device)  # normalized to gridspace gain (5 + 14*2 + 2)
         else:
             gain = torch.ones(7, device=targets.device)  # normalized to gridspace gain
         ai = torch.arange(na, device=targets.device).float().view(na, 1).repeat(1, nt)  # same as .repeat_interleave(nt)
-        
-        # 确保targets的形状与gain匹配
-        if self.kpt_label and targets.shape[2] != gain.shape[0] - 1:
-            # 如果targets的形状与gain不匹配，需要调整
-            if self.nkpt == 14 and targets.shape[2] > 35:  # CrowdPose数据集，但targets是COCO格式
-                # 从COCO格式(41列)转换为CrowdPose格式(35列)
-                # 保留类别和bbox (0-4)，以及前14个关键点 (5-32)
-                new_targets = torch.zeros((targets.shape[0], targets.shape[1], 35), device=targets.device)
-                new_targets[:, :, :5] = targets[:, :, :5]  # 类别和bbox
-                new_targets[:, :, 5:33] = targets[:, :, 5:33]  # 前14个关键点
-                new_targets[:, :, 33:] = targets[:, :, 39:]  # anchor索引
-                targets = new_targets
-            elif self.nkpt == 17 and targets.shape[2] < 41:  # COCO数据集，但targets是CrowdPose格式
-                # 从CrowdPose格式(35列)转换为COCO格式(41列)
-                # 这种情况应该不会发生，但为了完整性添加
-                new_targets = torch.zeros((targets.shape[0], targets.shape[1], 41), device=targets.device)
-                new_targets[:, :, :5] = targets[:, :, :5]  # 类别和bbox
-                new_targets[:, :, 5:33] = targets[:, :, 5:33]  # 前14个关键点
-                new_targets[:, :, 39:] = targets[:, :, 33:]  # anchor索引
-                targets = new_targets
         
         targets = torch.cat((targets.repeat(na, 1, 1), ai[:, :, None]), 2)  # append anchor indices
 
@@ -238,14 +206,8 @@ class ComputeLoss:
         for i in range(self.nl):
             anchors = self.anchors[i]
             if self.kpt_label:
-                if self.nkpt == 17:  # COCO
-                    gain[2:40] = torch.tensor(p[i].shape)[19*[3, 2]]  # xyxy gain
-                elif self.nkpt == 14:  # CrowdPose
-                    gain[2:34] = torch.tensor(p[i].shape)[16*[3, 2]]  # xyxy gain
-                else:
-                    # 通用情况
-                    repeat_pattern = [3, 2] * (self.nkpt + 1)  # +1 for the bbox
-                    gain[2:2+self.nkpt*2] = torch.tensor(p[i].shape)[repeat_pattern[:self.nkpt*2]]
+                # 只考虑CrowdPose数据集的14个关键点
+                gain[2:34] = torch.tensor(p[i].shape)[16*[3, 2]]  # xyxy gain
             else:
                 gain[2:6] = torch.tensor(p[i].shape)[[3, 2, 3, 2]]  # xyxy gain
 
