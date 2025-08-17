@@ -4,4 +4,4 @@ __pycache__/
 .idea/
 .vscode/
 *.pt
-yolov7-pose-1
+yolov7-pose-1/
