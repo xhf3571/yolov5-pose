@@ -244,8 +244,23 @@ class ComputeLoss:
             indices.append((b, a, gj.clamp_(0, gain[3] - 1), gi.clamp_(0, gain[2] - 1)))  # image, anchor, grid indices
             tbox.append(torch.cat((gxy - gij, gwh), 1))  # box
             if self.kpt_label:
+                # 修复关键点处理
                 for kpt in range(self.nkpt):
-                    t[:, 6+2*kpt: 6+2*(kpt+1)][t[:,6+2*kpt: 6+2*(kpt+1)] !=0] -= gij[t[:,6+2*kpt: 6+2*(kpt+1)] !=0]
+                    # 分别处理x和y坐标
+                    x_idx = 6 + 2*kpt
+                    y_idx = 6 + 2*kpt + 1
+                    
+                    # 创建x坐标的掩码
+                    x_mask = t[:, x_idx] != 0
+                    # 创建y坐标的掩码
+                    y_mask = t[:, y_idx] != 0
+                    
+                    # 分别处理x和y坐标
+                    if x_mask.any():
+                        t[:, x_idx][x_mask] -= gij[:, 0][x_mask]
+                    if y_mask.any():
+                        t[:, y_idx][y_mask] -= gij[:, 1][y_mask]
+                
                 tkpt.append(t[:, 6:-1])
             anch.append(anchors[a])  # anchors
             tcls.append(c)  # class
