@@ -1082,7 +1082,14 @@ def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, s
         targets = targets[i]
         targets[:, 1:5] = new[i]
         if kpt_label:
-            targets[:, 5:] = xy_kpts[i]
+            # 确保关键点数据的形状匹配
+            if xy_kpts.shape[1] == targets[:, 5:].shape[1]:
+                targets[:, 5:] = xy_kpts[i]
+            else:
+                print(f"警告: 关键点形状不匹配 - xy_kpts: {xy_kpts.shape}, targets[:, 5:]: {targets[:, 5:].shape}")
+                # 只复制可用的关键点数据
+                min_kpts = min(xy_kpts.shape[1], targets[:, 5:].shape[1])
+                targets[:, 5:5+min_kpts] = xy_kpts[i, :min_kpts]
 
     return img, targets
 

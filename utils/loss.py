@@ -116,7 +116,19 @@ class ComputeLoss:
     def __call__(self, p, targets):  # predictions, targets, model
         device = targets.device
         lcls, lbox, lobj, lkpt, lkptv = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
-        sigmas = torch.tensor([.26, .25, .25, .35, .35, .79, .79, .72, .72, .62, .62, 1.07, 1.07, .87, .87, .89, .89], device=device) / 10.0
+        
+        # 根据关键点数量选择不同的sigmas
+        if self.nkpt == 17:  # COCO
+            sigmas = torch.tensor([.26, .25, .25, .35, .35, .79, .79, .72, .72, .62, .62, 1.07, 1.07, .87, .87, .89, .89], device=device) / 10.0
+        elif self.nkpt == 14:  # CrowdPose
+            # CrowdPose关键点定义：0-left_shoulder, 1-right_shoulder, 2-left_elbow, 3-right_elbow, 4-left_wrist, 
+            # 5-right_wrist, 6-left_hip, 7-right_hip, 8-left_knee, 9-right_knee, 10-left_ankle, 11-right_ankle, 
+            # 12-head, 13-neck
+            sigmas = torch.tensor([.79, .79, .72, .72, .62, .62, 1.07, 1.07, .87, .87, .89, .89, .25, .25], device=device) / 10.0
+        else:
+            # 默认情况，创建一个全为0.5的sigmas数组
+            sigmas = torch.ones(self.nkpt, device=device) * 0.5 / 10.0
+            
         tcls, tbox, tkpt, indices, anchors = self.build_targets(p, targets)  # targets
 
         # Losses
@@ -184,7 +196,13 @@ class ComputeLoss:
         na, nt = self.na, targets.shape[0]  # number of anchors, targets
         tcls, tbox, tkpt, indices, anch = [], [], [], [], []
         if self.kpt_label:
-            gain = torch.ones(41, device=targets.device)  # normalized to gridspace gain
+            # 根据关键点数量调整gain数组大小
+            if self.nkpt == 17:  # COCO
+                gain = torch.ones(41, device=targets.device)  # normalized to gridspace gain (5 + 17*2 + 2)
+            elif self.nkpt == 14:  # CrowdPose
+                gain = torch.ones(35, device=targets.device)  # normalized to gridspace gain (5 + 14*2 + 2)
+            else:
+                gain = torch.ones(5 + self.nkpt*2 + 2, device=targets.device)  # 通用情况
         else:
             gain = torch.ones(7, device=targets.device)  # normalized to gridspace gain
         ai = torch.arange(na, device=targets.device).float().view(na, 1).repeat(1, nt)  # same as .repeat_interleave(nt)
@@ -199,7 +217,14 @@ class ComputeLoss:
         for i in range(self.nl):
             anchors = self.anchors[i]
             if self.kpt_label:
-                gain[2:40] = torch.tensor(p[i].shape)[19*[3, 2]]  # xyxy gain
+                if self.nkpt == 17:  # COCO
+                    gain[2:40] = torch.tensor(p[i].shape)[19*[3, 2]]  # xyxy gain
+                elif self.nkpt == 14:  # CrowdPose
+                    gain[2:34] = torch.tensor(p[i].shape)[16*[3, 2]]  # xyxy gain
+                else:
+                    # 通用情况
+                    repeat_pattern = [3, 2] * (self.nkpt + 1)  # +1 for the bbox
+                    gain[2:2+self.nkpt*2] = torch.tensor(p[i].shape)[repeat_pattern[:self.nkpt*2]]
             else:
                 gain[2:6] = torch.tensor(p[i].shape)[[3, 2, 3, 2]]  # xyxy gain
 
