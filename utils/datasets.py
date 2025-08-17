@@ -702,7 +702,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             else:
                 labels_out[:, 1:] = torch.from_numpy(labels[:, :5])
 
-
         # Convert
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
         img = np.ascontiguousarray(img)

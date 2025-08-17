@@ -112,6 +112,9 @@ class ComputeLoss:
         self.BCEcls, self.BCEobj, self.gr, self.hyp, self.autobalance = BCEcls, BCEobj, model.gr, h, autobalance
         for k in 'na', 'nc', 'nl', 'anchors', 'nkpt':
             setattr(self, k, getattr(det, k))
+        
+        # 检查是否为CrowdPose数据集
+        self.is_crowdpose = True  # 直接设置为CrowdPose数据集
 
     def __call__(self, p, targets):  # predictions, targets, model
         device = targets.device
@@ -121,6 +124,17 @@ class ComputeLoss:
         # 5-right_wrist, 6-left_hip, 7-right_hip, 8-left_knee, 9-right_knee, 10-left_ankle, 11-right_ankle, 
         # 12-head, 13-neck
         sigmas = torch.tensor([.79, .79, .72, .72, .62, .62, 1.07, 1.07, .87, .87, .89, .89, .25, .25], device=device) / 10.0
+        
+        # 确保targets的形状正确
+        if self.kpt_label and targets.shape[1] > 6:
+            # 检查targets的形状是否与CrowdPose的14个关键点匹配
+            expected_cols = 6 + 2 * 14  # 6(image_idx + bbox) + 14*2(keypoints)
+            if targets.shape[1] != expected_cols:
+                print(f"警告: targets形状不匹配 - 预期{expected_cols}列，实际{targets.shape[1]}列")
+                # 如果列数不匹配，可能是COCO格式，需要调整为CrowdPose格式
+                if targets.shape[1] > expected_cols:
+                    # 截断多余的列
+                    targets = targets[:, :expected_cols]
             
         tcls, tbox, tkpt, indices, anchors = self.build_targets(p, targets)  # targets
 
@@ -207,7 +221,7 @@ class ComputeLoss:
             anchors = self.anchors[i]
             if self.kpt_label:
                 # 只考虑CrowdPose数据集的14个关键点
-                gain[2:34] = torch.tensor(p[i].shape)[16*[3, 2]]  # xyxy gain
+                gain[2:34] = torch.tensor(p[i].shape)[[3, 2] * 16]  # xyxy gain
             else:
                 gain[2:6] = torch.tensor(p[i].shape)[[3, 2, 3, 2]]  # xyxy gain
 
@@ -245,21 +259,23 @@ class ComputeLoss:
             tbox.append(torch.cat((gxy - gij, gwh), 1))  # box
             if self.kpt_label:
                 # 修复关键点处理
-                for kpt in range(self.nkpt):
+                for kpt in range(min(self.nkpt, 14)):  # 限制为最多14个关键点(CrowdPose)
                     # 分别处理x和y坐标
                     x_idx = 6 + 2*kpt
                     y_idx = 6 + 2*kpt + 1
                     
-                    # 创建x坐标的掩码
-                    x_mask = t[:, x_idx] != 0
-                    # 创建y坐标的掩码
-                    y_mask = t[:, y_idx] != 0
-                    
-                    # 分别处理x和y坐标
-                    if x_mask.any():
-                        t[:, x_idx][x_mask] -= gij[:, 0][x_mask]
-                    if y_mask.any():
-                        t[:, y_idx][y_mask] -= gij[:, 1][y_mask]
+                    # 确保索引在有效范围内
+                    if x_idx < t.shape[1] and y_idx < t.shape[1]:
+                        # 创建x坐标的掩码
+                        x_mask = t[:, x_idx] != 0
+                        # 创建y坐标的掩码
+                        y_mask = t[:, y_idx] != 0
+                        
+                        # 分别处理x和y坐标
+                        if x_mask.any():
+                            t[:, x_idx][x_mask] -= gij[:, 0][x_mask]
+                        if y_mask.any():
+                            t[:, y_idx][y_mask] -= gij[:, 1][y_mask]
                 
                 tkpt.append(t[:, 6:-1])
             anch.append(anchors[a])  # anchors
