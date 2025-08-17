@@ -361,7 +361,15 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.stride = stride
         self.path = path
         self.kpt_label = kpt_label
-        self.flip_index = [0, 2, 1, 4, 3, 6, 5, 8, 7, 10, 9, 12, 11, 14, 13, 16, 15]
+        # 根据数据集类型选择不同的flip_index
+        if any(x in str(path) for x in ['CrowdPose', 'crowdpose']):
+            # CrowdPose关键点定义：0-left_shoulder, 1-right_shoulder, 2-left_elbow, 3-right_elbow, 4-left_wrist, 
+            # 5-right_wrist, 6-left_hip, 7-right_hip, 8-left_knee, 9-right_knee, 10-left_ankle, 11-right_ankle, 
+            # 12-head, 13-neck
+            self.flip_index = [1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 12, 13]
+        else:
+            # COCO关键点的flip_index
+            self.flip_index = [0, 2, 1, 4, 3, 6, 5, 8, 7, 10, 9, 12, 11, 14, 13, 16, 15]
 
         try:
             f = []  # image files
@@ -493,16 +501,34 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     if len(l):
                         assert (l >= 0).all(), 'negative labels'
                         if kpt_label:
-                            assert l.shape[1] == 56, 'labels require 56 columns each'
-                            assert (l[:, 5::3] <= 1).all(), 'non-normalized or out of bounds coordinate labels'
-                            assert (l[:, 6::3] <= 1).all(), 'non-normalized or out of bounds coordinate labels'
-                            # print("l shape", l.shape)
-                            kpts = np.zeros((l.shape[0], 39))
-                            for i in range(len(l)):
-                                kpt = np.delete(l[i,5:], np.arange(2, l.shape[1]-5, 3))  #remove the occlusion paramater from the GT
-                                kpts[i] = np.hstack((l[i, :5], kpt))
-                            l = kpts
-                            assert l.shape[1] == 39, 'labels require 39 columns each after removing occlusion paramater'
+                            # 检查是否为CrowdPose数据集
+                            is_crowdpose = any(x in str(path) for x in ['CrowdPose', 'crowdpose'])
+                            
+                            if is_crowdpose:
+                                # CrowdPose有14个关键点，每个关键点3个值(x,y,v)，加上5个bbox值，总共47列
+                                assert l.shape[1] == 47, 'CrowdPose labels require 47 columns each'
+                                assert (l[:, 5::3] <= 1).all(), 'non-normalized or out of bounds coordinate labels'
+                                assert (l[:, 6::3] <= 1).all(), 'non-normalized or out of bounds coordinate labels'
+                                
+                                # 移除可见性值，只保留坐标
+                                kpts = np.zeros((l.shape[0], 33))  # 5(bbox) + 14*2(keypoints) = 33
+                                for i in range(len(l)):
+                                    kpt = np.delete(l[i,5:], np.arange(2, 42, 3))  # 移除可见性值
+                                    kpts[i] = np.hstack((l[i, :5], kpt))
+                                l = kpts
+                                assert l.shape[1] == 33, 'CrowdPose labels require 33 columns each after removing visibility'
+                            else:
+                                # COCO有17个关键点
+                                assert l.shape[1] == 56, 'COCO labels require 56 columns each'
+                                assert (l[:, 5::3] <= 1).all(), 'non-normalized or out of bounds coordinate labels'
+                                assert (l[:, 6::3] <= 1).all(), 'non-normalized or out of bounds coordinate labels'
+                                
+                                kpts = np.zeros((l.shape[0], 39))  # 5(bbox) + 17*2(keypoints) = 39
+                                for i in range(len(l)):
+                                    kpt = np.delete(l[i,5:], np.arange(2, l.shape[1]-5, 3))  # 移除可见性值
+                                    kpts[i] = np.hstack((l[i, :5], kpt))
+                                l = kpts
+                                assert l.shape[1] == 39, 'COCO labels require 39 columns each after removing visibility'
                         else:
                             assert l.shape[1] == 5, 'labels require 5 columns each'
                             assert (l[:, 1:5] <= 1).all(), 'non-normalized or out of bounds coordinate labels'
@@ -983,18 +1009,35 @@ def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, s
             new[:, [0, 2]] = new[:, [0, 2]].clip(0, width)
             new[:, [1, 3]] = new[:, [1, 3]].clip(0, height)
             if kpt_label:
-                xy_kpts = np.ones((n * 17, 3))
-                xy_kpts[:, :2] = targets[:,5:].reshape(n*17, 2)  #num_kpt is hardcoded to 17
-                xy_kpts = xy_kpts @ M.T # transform
-                xy_kpts = (xy_kpts[:, :2] / xy_kpts[:, 2:3] if perspective else xy_kpts[:, :2]).reshape(n, 34)  # perspective rescale or affine
-                xy_kpts[targets[:,5:]==0] = 0
-                x_kpts = xy_kpts[:, list(range(0,34,2))]
-                y_kpts = xy_kpts[:, list(range(1,34,2))]
-
+                # 检查是否为CrowdPose数据集
+                is_crowdpose = len(targets[0]) == 33  # 5(bbox) + 14*2(keypoints) = 33
+                
+                if is_crowdpose:
+                    # CrowdPose有14个关键点
+                    num_kpt = 14
+                    xy_kpts = np.ones((n * num_kpt, 3))
+                    xy_kpts[:, :2] = targets[:,5:].reshape(n*num_kpt, 2)
+                    xy_kpts = xy_kpts @ M.T # transform
+                    xy_kpts = (xy_kpts[:, :2] / xy_kpts[:, 2:3] if perspective else xy_kpts[:, :2]).reshape(n, num_kpt*2)
+                    xy_kpts[targets[:,5:]==0] = 0
+                    x_kpts = xy_kpts[:, list(range(0,num_kpt*2,2))]
+                    y_kpts = xy_kpts[:, list(range(1,num_kpt*2,2))]
+                else:
+                    # COCO有17个关键点
+                    num_kpt = 17
+                    xy_kpts = np.ones((n * num_kpt, 3))
+                    xy_kpts[:, :2] = targets[:,5:].reshape(n*num_kpt, 2)
+                    xy_kpts = xy_kpts @ M.T # transform
+                    xy_kpts = (xy_kpts[:, :2] / xy_kpts[:, 2:3] if perspective else xy_kpts[:, :2]).reshape(n, num_kpt*2)
+                    xy_kpts[targets[:,5:]==0] = 0
+                    x_kpts = xy_kpts[:, list(range(0,num_kpt*2,2))]
+                    y_kpts = xy_kpts[:, list(range(1,num_kpt*2,2))]
+                
+                # 对于任何数据集，将超出图像边界的关键点设为0
                 x_kpts[np.logical_or.reduce((x_kpts < 0, x_kpts > width, y_kpts < 0, y_kpts > height))] = 0
                 y_kpts[np.logical_or.reduce((x_kpts < 0, x_kpts > width, y_kpts < 0, y_kpts > height))] = 0
-                xy_kpts[:, list(range(0, 34, 2))] = x_kpts
-                xy_kpts[:, list(range(1, 34, 2))] = y_kpts
+                xy_kpts[:, list(range(0, num_kpt*2, 2))] = x_kpts
+                xy_kpts[:, list(range(1, num_kpt*2, 2))] = y_kpts
 
         # filter candidates
         i = box_candidates(box1=targets[:, 1:5].T * s, box2=new.T, area_thr=0.01 if use_segments else 0.10)

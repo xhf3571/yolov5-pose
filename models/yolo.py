@@ -90,8 +90,8 @@ class Detect(nn.Module):
                     xy = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
                     wh = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i].view(1, self.na, 1, 1, 2) # wh
                     if self.nkpt != 0:
-                        x_kpt[..., 0::3] = (x_kpt[..., ::3] * 2. - 0.5 + kpt_grid_x.repeat(1,1,1,1,17)) * self.stride[i]  # xy
-                        x_kpt[..., 1::3] = (x_kpt[..., 1::3] * 2. - 0.5 + kpt_grid_y.repeat(1,1,1,1,17)) * self.stride[i]  # xy
+                        x_kpt[..., 0::3] = (x_kpt[..., ::3] * 2. - 0.5 + kpt_grid_x.repeat(1,1,1,1,self.nkpt)) * self.stride[i]  # xy
+                        x_kpt[..., 1::3] = (x_kpt[..., 1::3] * 2. - 0.5 + kpt_grid_y.repeat(1,1,1,1,self.nkpt)) * self.stride[i]  # xy
                         x_kpt[..., 2::3] = x_kpt[..., 2::3].sigmoid()
 
                     y = torch.cat((xy, wh, y[..., 4:], x_kpt), dim = -1)
@@ -355,4 +355,3 @@ if __name__ == '__main__':
     # logger.info("Run 'tensorboard --logdir=models' to view tensorboard at http://localhost:6006/")
     # tb_writer.add_graph(torch.jit.trace(model, img, strict=False), [])  # add model graph
     # tb_writer.add_image('test', img[0], dataformats='CWH')  # add model to tensorboard
-
