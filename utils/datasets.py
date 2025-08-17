@@ -506,7 +506,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                             
                             if is_crowdpose:
                                 # CrowdPose有14个关键点，每个关键点3个值(x,y,v)，加上5个bbox值，总共47列
-                                assert l.shape[1] == 47, 'CrowdPose labels require 47 columns each'
+                                assert l.shape[1] == 47, f'CrowdPose labels require 47 columns each, got {l.shape[1]}'
                                 assert (l[:, 5::3] <= 1).all(), 'non-normalized or out of bounds coordinate labels'
                                 assert (l[:, 6::3] <= 1).all(), 'non-normalized or out of bounds coordinate labels'
                                 
@@ -516,10 +516,10 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                                     kpt = np.delete(l[i,5:], np.arange(2, 42, 3))  # 移除可见性值
                                     kpts[i] = np.hstack((l[i, :5], kpt))
                                 l = kpts
-                                assert l.shape[1] == 33, 'CrowdPose labels require 33 columns each after removing visibility'
+                                assert l.shape[1] == 33, f'CrowdPose labels require 33 columns each after removing visibility, got {l.shape[1]}'
                             else:
                                 # COCO有17个关键点
-                                assert l.shape[1] == 56, 'COCO labels require 56 columns each'
+                                assert l.shape[1] == 56, f'COCO labels require 56 columns each, got {l.shape[1]}'
                                 assert (l[:, 5::3] <= 1).all(), 'non-normalized or out of bounds coordinate labels'
                                 assert (l[:, 6::3] <= 1).all(), 'non-normalized or out of bounds coordinate labels'
                                 
@@ -528,7 +528,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                                     kpt = np.delete(l[i,5:], np.arange(2, l.shape[1]-5, 3))  # 移除可见性值
                                     kpts[i] = np.hstack((l[i, :5], kpt))
                                 l = kpts
-                                assert l.shape[1] == 39, 'COCO labels require 39 columns each after removing visibility'
+                                assert l.shape[1] == 39, f'COCO labels require 39 columns each after removing visibility, got {l.shape[1]}'
                         else:
                             assert l.shape[1] == 5, 'labels require 5 columns each'
                             assert (l[:, 1:5] <= 1).all(), 'non-normalized or out of bounds coordinate labels'
@@ -536,11 +536,27 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                         assert np.unique(l, axis=0).shape[0] == l.shape[0], 'duplicate labels'
                     else:
                         ne += 1  # label empty
-                        l = np.zeros((0, 39), dtype=np.float32) if kpt_label else np.zeros((0, 5), dtype=np.float32)
+                        if kpt_label:
+                            # 根据数据集类型决定空标签的形状
+                            is_crowdpose = any(x in str(path) for x in ['CrowdPose', 'crowdpose'])
+                            if is_crowdpose:
+                                l = np.zeros((0, 33), dtype=np.float32)  # CrowdPose: 5(bbox) + 14*2(keypoints) = 33
+                            else:
+                                l = np.zeros((0, 39), dtype=np.float32)  # COCO: 5(bbox) + 17*2(keypoints) = 39
+                        else:
+                            l = np.zeros((0, 5), dtype=np.float32)
 
                 else:
                     nm += 1  # label missing
-                    l = np.zeros((0, 39), dtype=np.float32) if kpt_label else np.zeros((0, 5), dtype=np.float32)
+                    if kpt_label:
+                        # 根据数据集类型决定空标签的形状
+                        is_crowdpose = any(x in str(path) for x in ['CrowdPose', 'crowdpose'])
+                        if is_crowdpose:
+                            l = np.zeros((0, 33), dtype=np.float32)  # CrowdPose: 5(bbox) + 14*2(keypoints) = 33
+                        else:
+                            l = np.zeros((0, 39), dtype=np.float32)  # COCO: 5(bbox) + 17*2(keypoints) = 39
+                    else:
+                        l = np.zeros((0, 5), dtype=np.float32)
 
                 x[im_file] = [l, shape, segments]
             except Exception as e:
@@ -1018,12 +1034,19 @@ def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, s
                     xy_kpts = np.ones((n * num_kpt, 3))
                     # 确保targets的形状正确
                     if targets.shape[1] == 33:  # 5(bbox) + 14*2(keypoints) = 33
-                        xy_kpts[:, :2] = targets[:,5:].reshape(n*num_kpt, 2)
-                        xy_kpts = xy_kpts @ M.T # transform
-                        xy_kpts = (xy_kpts[:, :2] / xy_kpts[:, 2:3] if perspective else xy_kpts[:, :2]).reshape(n, num_kpt*2)
-                        xy_kpts[targets[:,5:]==0] = 0
-                        x_kpts = xy_kpts[:, list(range(0,num_kpt*2,2))]
-                        y_kpts = xy_kpts[:, list(range(1,num_kpt*2,2))]
+                        try:
+                            xy_kpts[:, :2] = targets[:,5:].reshape(n*num_kpt, 2)
+                            xy_kpts = xy_kpts @ M.T # transform
+                            xy_kpts = (xy_kpts[:, :2] / xy_kpts[:, 2:3] if perspective else xy_kpts[:, :2]).reshape(n, num_kpt*2)
+                            xy_kpts[targets[:,5:]==0] = 0
+                            x_kpts = xy_kpts[:, list(range(0,num_kpt*2,2))]
+                            y_kpts = xy_kpts[:, list(range(1,num_kpt*2,2))]
+                        except ValueError as e:
+                            print(f"重塑错误: {e}, targets.shape={targets.shape}, n={n}, num_kpt={num_kpt}")
+                            # 创建一个全零的关键点数组作为回退
+                            xy_kpts = np.zeros((n, num_kpt*2))
+                            x_kpts = np.zeros((n, num_kpt))
+                            y_kpts = np.zeros((n, num_kpt))
                     else:
                         # 如果形状不匹配，可能是因为数据集混合或标签格式不一致
                         # 创建一个全零的关键点数组
@@ -1034,12 +1057,19 @@ def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, s
                     # COCO有17个关键点
                     num_kpt = 17
                     xy_kpts = np.ones((n * num_kpt, 3))
-                    xy_kpts[:, :2] = targets[:,5:].reshape(n*num_kpt, 2)
-                    xy_kpts = xy_kpts @ M.T # transform
-                    xy_kpts = (xy_kpts[:, :2] / xy_kpts[:, 2:3] if perspective else xy_kpts[:, :2]).reshape(n, num_kpt*2)
-                    xy_kpts[targets[:,5:]==0] = 0
-                    x_kpts = xy_kpts[:, list(range(0,num_kpt*2,2))]
-                    y_kpts = xy_kpts[:, list(range(1,num_kpt*2,2))]
+                    try:
+                        xy_kpts[:, :2] = targets[:,5:].reshape(n*num_kpt, 2)
+                        xy_kpts = xy_kpts @ M.T # transform
+                        xy_kpts = (xy_kpts[:, :2] / xy_kpts[:, 2:3] if perspective else xy_kpts[:, :2]).reshape(n, num_kpt*2)
+                        xy_kpts[targets[:,5:]==0] = 0
+                        x_kpts = xy_kpts[:, list(range(0,num_kpt*2,2))]
+                        y_kpts = xy_kpts[:, list(range(1,num_kpt*2,2))]
+                    except ValueError as e:
+                        print(f"重塑错误: {e}, targets.shape={targets.shape}, n={n}, num_kpt={num_kpt}")
+                        # 创建一个全零的关键点数组作为回退
+                        xy_kpts = np.zeros((n, num_kpt*2))
+                        x_kpts = np.zeros((n, num_kpt))
+                        y_kpts = np.zeros((n, num_kpt))
                 
                 # 对于任何数据集，将超出图像边界的关键点设为0
                 x_kpts[np.logical_or.reduce((x_kpts < 0, x_kpts > width, y_kpts < 0, y_kpts > height))] = 0

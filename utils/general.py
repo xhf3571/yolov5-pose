@@ -330,11 +330,17 @@ def xywhn2xyxy(x, w=640, h=640, padw=0, padh=0, kpt_label=False):
         num_kpts = (x.shape[1]-4)//2
         for kpt in range(num_kpts):
             for kpt_instance in range(y.shape[0]):
-                if kpt*2+4 < y.shape[1]:  # 确保索引在有效范围内
-                    if y[kpt_instance, 2 * kpt + 4]!=0:
-                        y[kpt_instance, 2*kpt+4] = w * y[kpt_instance, 2*kpt+4] + padw
-                    if 2*kpt+1+4 < y.shape[1] and y[kpt_instance, 2 * kpt + 1 + 4] !=0:
-                        y[kpt_instance, 2*kpt+1+4] = h * y[kpt_instance, 2*kpt+1+4] + padh
+                # 确保索引在有效范围内
+                x_idx = 2 * kpt + 4
+                y_idx = 2 * kpt + 1 + 4
+                
+                if x_idx < y.shape[1]:  # 检查x坐标索引是否有效
+                    if y[kpt_instance, x_idx] != 0:
+                        y[kpt_instance, x_idx] = w * x[kpt_instance, x_idx] + padw
+                
+                if y_idx < y.shape[1]:  # 检查y坐标索引是否有效
+                    if y[kpt_instance, y_idx] != 0:
+                        y[kpt_instance, y_idx] = h * x[kpt_instance, y_idx] + padh
     return y
 
 
