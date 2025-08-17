@@ -361,15 +361,20 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.stride = stride
         self.path = path
         self.kpt_label = kpt_label
-        # 根据数据集类型选择不同的flip_index
-        if any(x in str(path) for x in ['CrowdPose', 'crowdpose']):
+        
+        # 检查是否为CrowdPose数据集
+        is_crowdpose = any(x in str(path) for x in ['CrowdPose', 'crowdpose'])
+        
+        if is_crowdpose:
             # CrowdPose关键点定义：0-left_shoulder, 1-right_shoulder, 2-left_elbow, 3-right_elbow, 4-left_wrist, 
             # 5-right_wrist, 6-left_hip, 7-right_hip, 8-left_knee, 9-right_knee, 10-left_ankle, 11-right_ankle, 
             # 12-head, 13-neck
             self.flip_index = [1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 12, 13]
+            self.num_kpts = 14
         else:
-            # COCO关键点的flip_index
+            # COCO关键点定义
             self.flip_index = [0, 2, 1, 4, 3, 6, 5, 8, 7, 10, 9, 12, 11, 14, 13, 16, 15]
+            self.num_kpts = 17
 
         try:
             f = []  # image files
@@ -665,28 +670,24 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     labels[:, 1] = 1 - labels[:, 1]
                     if self.kpt_label:
                         labels[:, 5::2] = (1 - labels[:, 5::2])*(labels[:, 5::2]!=0)
+                        # 直接应用CrowdPose的flip_index进行关键点翻转
                         labels[:, 5::2] = labels[:, 5::2][:, self.flip_index]
                         labels[:, 6::2] = labels[:, 6::2][:, self.flip_index]
 
-        # 根据数据集类型确定关键点数量
-        if any(x in str(self.path) for x in ['CrowdPose', 'crowdpose']):
-            num_kpts = 14  # CrowdPose有14个关键点
-        else:
-            num_kpts = 17  # COCO有17个关键点
-            
-        labels_out = torch.zeros((nL, 6+2*num_kpts)) if self.kpt_label else torch.zeros((nL, 6))
+        # 使用类中定义的关键点数量
+        labels_out = torch.zeros((nL, 6+2*self.num_kpts)) if self.kpt_label else torch.zeros((nL, 6))
         if nL:
-            if self.kpt_label:
-                # 确保labels的形状与labels_out匹配
-                if labels.shape[1] == 5 + 2*num_kpts:  # 正确的形状
-                    labels_out[:, 1:] = torch.from_numpy(labels)
-                else:
-                    # 如果形状不匹配，只复制可用的部分
-                    labels_out[:, 1:6] = torch.from_numpy(labels[:, :5])  # 复制bbox
-                    min_kpts = min((labels.shape[1]-5)//2, num_kpts)
-                    if min_kpts > 0:
-                        for k in range(min_kpts):
-                            labels_out[:, 6+2*k:6+2*(k+1)] = torch.from_numpy(labels[:, 5+2*k:5+2*(k+1)])
+                if self.kpt_label:
+                    # 确保labels的形状与labels_out匹配
+                    if labels.shape[1] == 5 + 2*self.num_kpts:  # 正确的形状
+                        labels_out[:, 1:] = torch.from_numpy(labels)
+                    else:
+                        # 如果形状不匹配，只复制可用的部分
+                        labels_out[:, 1:6] = torch.from_numpy(labels[:, :5])  # 复制bbox
+                        min_kpts = min((labels.shape[1]-5)//2, self.num_kpts)
+                        if min_kpts > 0:
+                            for k in range(min_kpts):
+                                labels_out[:, 6+2*k:6+2*(k+1)] = torch.from_numpy(labels[:, 5+2*k:5+2*(k+1)])
             else:
                 labels_out[:, 1:] = torch.from_numpy(labels[:, :5])
 
@@ -1040,42 +1041,48 @@ def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, s
             new[:, [1, 3]] = new[:, [1, 3]].clip(0, height)
             if kpt_label:
                 # 检查是否为CrowdPose数据集
-                is_crowdpose = len(targets[0]) == 33  # 5(bbox) + 14*2(keypoints) = 33
+                is_crowdpose = any(x in str(targets) for x in ['CrowdPose', 'crowdpose'])
                 
+                # 根据数据集类型确定关键点数量
                 if is_crowdpose:
-                    # CrowdPose有14个关键点
-                    num_kpt = 14
-                    xy_kpts = np.ones((n * num_kpt, 3))
-                    # 确保targets的形状正确
-                    if targets.shape[1] == 33:  # 5(bbox) + 14*2(keypoints) = 33
-                        try:
-                            xy_kpts[:, :2] = targets[:,5:].reshape(n*num_kpt, 2)
-                            xy_kpts = xy_kpts @ M.T # transform
-                            xy_kpts = (xy_kpts[:, :2] / xy_kpts[:, 2:3] if perspective else xy_kpts[:, :2]).reshape(n, num_kpt*2)
-                            xy_kpts[targets[:,5:]==0] = 0
-                            x_kpts = xy_kpts[:, list(range(0,num_kpt*2,2))]
-                            y_kpts = xy_kpts[:, list(range(1,num_kpt*2,2))]
-                        except ValueError as e:
-                            print(f"重塑错误: {e}, targets.shape={targets.shape}, n={n}, num_kpt={num_kpt}")
-                            # 创建一个全零的关键点数组作为回退
-                            xy_kpts = np.zeros((n, num_kpt*2))
-                            x_kpts = np.zeros((n, num_kpt))
-                            y_kpts = np.zeros((n, num_kpt))
-                    else:
-                        # 如果形状不匹配，可能是因为数据集混合或标签格式不一致
-                        # 创建一个全零的关键点数组
-                        xy_kpts = np.zeros((n, num_kpt*2))
-                        x_kpts = np.zeros((n, num_kpt))
-                        y_kpts = np.zeros((n, num_kpt))
+                    num_kpt = 14  # CrowdPose有14个关键点
                 else:
-                    # COCO有17个关键点
-                    num_kpt = 17
+                    num_kpt = 17  # COCO有17个关键点
+                    
                     xy_kpts = np.ones((n * num_kpt, 3))
                     try:
-                        xy_kpts[:, :2] = targets[:,5:].reshape(n*num_kpt, 2)
+                        # 计算每个目标的关键点数量
+                        kpts_per_target = (targets.shape[1] - 5) // 2
+                        
+                        if kpts_per_target == num_kpt:
+                            # 关键点数量匹配，直接重塑
+                            xy_kpts[:, :2] = targets[:,5:].reshape(n*num_kpt, 2)
+                        else:
+                            # 关键点数量不匹配，需要特殊处理
+                            print(f"警告: 关键点数量不匹配 - 目标有 {kpts_per_target} 个关键点，但需要 {num_kpt} 个")
+                            # 创建一个临时数组来存储关键点
+                            temp_kpts = np.zeros((n, num_kpt*2))
+                            # 复制可用的关键点
+                            min_kpts = min(kpts_per_target, num_kpt)
+                            for i in range(n):
+                                for k in range(min_kpts):
+                                    temp_kpts[i, 2*k:2*(k+1)] = targets[i, 5+2*k:5+2*(k+1)]
+                            xy_kpts[:, :2] = temp_kpts.reshape(n*num_kpt, 2)
+                        
                         xy_kpts = xy_kpts @ M.T # transform
                         xy_kpts = (xy_kpts[:, :2] / xy_kpts[:, 2:3] if perspective else xy_kpts[:, :2]).reshape(n, num_kpt*2)
-                        xy_kpts[targets[:,5:]==0] = 0
+                        
+                        # 创建一个掩码来标识有效的关键点
+                        valid_mask = np.zeros((n, num_kpt*2), dtype=bool)
+                        for i in range(n):
+                            for k in range(min(kpts_per_target, num_kpt)):
+                                if targets[i, 5+2*k] != 0 or targets[i, 5+2*k+1] != 0:
+                                    valid_mask[i, 2*k] = True
+                                    valid_mask[i, 2*k+1] = True
+                        
+                        # 将无效关键点设为0
+                        xy_kpts[~valid_mask] = 0
+                        
                         x_kpts = xy_kpts[:, list(range(0,num_kpt*2,2))]
                         y_kpts = xy_kpts[:, list(range(1,num_kpt*2,2))]
                     except ValueError as e:
