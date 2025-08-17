@@ -668,11 +668,25 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                         labels[:, 5::2] = labels[:, 5::2][:, self.flip_index]
                         labels[:, 6::2] = labels[:, 6::2][:, self.flip_index]
 
-        num_kpts = (labels.shape[1]-5)//2
+        # 根据数据集类型确定关键点数量
+        if any(x in str(self.path) for x in ['CrowdPose', 'crowdpose']):
+            num_kpts = 14  # CrowdPose有14个关键点
+        else:
+            num_kpts = 17  # COCO有17个关键点
+            
         labels_out = torch.zeros((nL, 6+2*num_kpts)) if self.kpt_label else torch.zeros((nL, 6))
         if nL:
-            if  self.kpt_label:
-                labels_out[:, 1:] = torch.from_numpy(labels)
+            if self.kpt_label:
+                # 确保labels的形状与labels_out匹配
+                if labels.shape[1] == 5 + 2*num_kpts:  # 正确的形状
+                    labels_out[:, 1:] = torch.from_numpy(labels)
+                else:
+                    # 如果形状不匹配，只复制可用的部分
+                    labels_out[:, 1:6] = torch.from_numpy(labels[:, :5])  # 复制bbox
+                    min_kpts = min((labels.shape[1]-5)//2, num_kpts)
+                    if min_kpts > 0:
+                        for k in range(min_kpts):
+                            labels_out[:, 6+2*k:6+2*(k+1)] = torch.from_numpy(labels[:, 5+2*k:5+2*(k+1)])
             else:
                 labels_out[:, 1:] = torch.from_numpy(labels[:, :5])
 
