@@ -636,7 +636,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                                                  scale=hyp['scale'],
                                                  shear=hyp['shear'],
                                                  perspective=hyp['perspective'],
-                                                 kpt_label=self.kpt_label)
+                                                 kpt_label=self.kpt_label,
+                                                 num_kpts=self.num_kpts)
 
             # Augment colorspace
             augment_hsv(img, hgain=hyp['hsv_h'], sgain=hyp['hsv_s'], vgain=hyp['hsv_v'])
@@ -830,7 +831,8 @@ def load_mosaic(self, index):
                                        shear=self.hyp['shear'],
                                        perspective=self.hyp['perspective'],
                                        border=self.mosaic_border,
-                                       kpt_label=self.kpt_label)  # border to remove
+                                       kpt_label=self.kpt_label,
+                                       num_kpts=self.num_kpts)  # border to remove
 
     return img4, labels4
 
@@ -905,7 +907,8 @@ def load_mosaic9(self, index):
                                        shear=self.hyp['shear'],
                                        perspective=self.hyp['perspective'],
                                        border=self.mosaic_border,
-                                       kpt_label=self.kpt_label)  # border to remove
+                                       kpt_label=self.kpt_label,
+                                       num_kpts=self.num_kpts)  # border to remove
 
     return img9, labels9
 
@@ -961,7 +964,7 @@ def letterbox(img, new_shape=(640, 640), color=(114, 114, 114), auto=True, scale
 
 
 def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, scale=.1, shear=10, perspective=0.0,
-                       border=(0, 0), kpt_label=False):
+                       border=(0, 0), kpt_label=False, num_kpts=None):
     # torchvision.transforms.RandomAffine(degrees=(-10, 10), translate=(.1, .1), scale=(.9, 1.1), shear=(-10, 10))
     # targets = [cls, xyxy]
 
@@ -1043,8 +1046,11 @@ def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, s
             # 处理关键点
             xy_kpts = None
             if kpt_label:
-                # 使用类中定义的关键点数量
-                num_kpt = self.num_kpts
+                # 使用传入的关键点数量，如果没有传入，则默认为17（COCO数据集）
+                if num_kpts is None:
+                    num_kpt = 17  # 默认为COCO数据集的17个关键点
+                else:
+                    num_kpt = num_kpts
                 
                 xy_kpts = np.ones((n * num_kpt, 3))
                 try:
