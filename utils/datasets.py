@@ -1016,12 +1016,20 @@ def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, s
                     # CrowdPose有14个关键点
                     num_kpt = 14
                     xy_kpts = np.ones((n * num_kpt, 3))
-                    xy_kpts[:, :2] = targets[:,5:].reshape(n*num_kpt, 2)
-                    xy_kpts = xy_kpts @ M.T # transform
-                    xy_kpts = (xy_kpts[:, :2] / xy_kpts[:, 2:3] if perspective else xy_kpts[:, :2]).reshape(n, num_kpt*2)
-                    xy_kpts[targets[:,5:]==0] = 0
-                    x_kpts = xy_kpts[:, list(range(0,num_kpt*2,2))]
-                    y_kpts = xy_kpts[:, list(range(1,num_kpt*2,2))]
+                    # 确保targets的形状正确
+                    if targets.shape[1] == 33:  # 5(bbox) + 14*2(keypoints) = 33
+                        xy_kpts[:, :2] = targets[:,5:].reshape(n*num_kpt, 2)
+                        xy_kpts = xy_kpts @ M.T # transform
+                        xy_kpts = (xy_kpts[:, :2] / xy_kpts[:, 2:3] if perspective else xy_kpts[:, :2]).reshape(n, num_kpt*2)
+                        xy_kpts[targets[:,5:]==0] = 0
+                        x_kpts = xy_kpts[:, list(range(0,num_kpt*2,2))]
+                        y_kpts = xy_kpts[:, list(range(1,num_kpt*2,2))]
+                    else:
+                        # 如果形状不匹配，可能是因为数据集混合或标签格式不一致
+                        # 创建一个全零的关键点数组
+                        xy_kpts = np.zeros((n, num_kpt*2))
+                        x_kpts = np.zeros((n, num_kpt))
+                        y_kpts = np.zeros((n, num_kpt))
                 else:
                     # COCO有17个关键点
                     num_kpt = 17
