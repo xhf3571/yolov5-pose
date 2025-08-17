@@ -85,7 +85,7 @@ def plot_one_box(x, im, color=None, label=None, line_thickness=3, kpt_label=Fals
 
 
 def plot_skeleton_kpts(im, kpts, steps, orig_shape=None):
-    #Plot the skeleton and keypointsfor coco datatset
+    #Plot the skeleton and keypoints for coco or crowdpose dataset
     palette = np.array([[255, 128, 0], [255, 153, 51], [255, 178, 102],
                         [230, 230, 0], [255, 153, 255], [153, 204, 255],
                         [255, 102, 255], [255, 51, 255], [102, 178, 255],
@@ -94,38 +94,72 @@ def plot_skeleton_kpts(im, kpts, steps, orig_shape=None):
                         [51, 255, 51], [0, 255, 0], [0, 0, 255], [255, 0, 0],
                         [255, 255, 255]])
 
-    skeleton = [[16, 14], [14, 12], [17, 15], [15, 13], [12, 13], [6, 12],
-                [7, 13], [6, 7], [6, 8], [7, 9], [8, 10], [9, 11], [2, 3],
-                [1, 2], [1, 3], [2, 4], [3, 5], [4, 6], [5, 7]]
-
-    pose_limb_color = palette[[9, 9, 9, 9, 7, 7, 7, 0, 0, 0, 0, 0, 16, 16, 16, 16, 16, 16, 16]]
-    pose_kpt_color = palette[[16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9]]
+    # 检测是否为CrowdPose数据集（通过关键点数量判断）
+    num_kpts = len(kpts) // steps
+    is_crowdpose = (num_kpts == 14)
+    
+    if is_crowdpose:
+        # CrowdPose骨架定义 (基于data/crowdpose_kpts.yaml中的skeleton)
+        skeleton = [[13, 12], [12, 0], [12, 1], [0, 2], [1, 3], [2, 4], [3, 5], 
+                   [0, 6], [1, 7], [6, 7], [6, 8], [7, 9], [8, 10], [9, 11]]
+        
+        # CrowdPose关键点颜色
+        pose_limb_color = palette[[9, 9, 9, 9, 9, 9, 9, 7, 7, 0, 0, 0, 0, 0]]
+        pose_kpt_color = palette[[16, 16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 9, 9]]
+    else:
+        # COCO骨架定义
+        skeleton = [[16, 14], [14, 12], [17, 15], [15, 13], [12, 13], [6, 12],
+                    [7, 13], [6, 7], [6, 8], [7, 9], [8, 10], [9, 11], [2, 3],
+                    [1, 2], [1, 3], [2, 4], [3, 5], [4, 6], [5, 7]]
+        
+        # COCO关键点颜色
+        pose_limb_color = palette[[9, 9, 9, 9, 7, 7, 7, 0, 0, 0, 0, 0, 16, 16, 16, 16, 16, 16, 16]]
+        pose_kpt_color = palette[[16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9]]
     radius = 5
     num_kpts = len(kpts) // steps
 
     for kid in range(num_kpts):
-        r, g, b = pose_kpt_color[kid]
+        if kid < len(pose_kpt_color):
+            r, g, b = pose_kpt_color[kid]
+        else:
+            r, g, b = palette[0]  # 默认颜色
+            
+        if steps * kid >= len(kpts) or steps * kid + 1 >= len(kpts):
+            continue
+            
         x_coord, y_coord = kpts[steps * kid], kpts[steps * kid + 1]
         if not (x_coord % 640 == 0 or y_coord % 640 == 0):
             if steps == 3:
+                if steps * kid + 2 >= len(kpts):
+                    continue
                 conf = kpts[steps * kid + 2]
                 if conf < 0.5:
                     continue
             cv2.circle(im, (int(x_coord), int(y_coord)), radius, (int(r), int(g), int(b)), -1)
 
     for sk_id, sk in enumerate(skeleton):
-        r, g, b = pose_limb_color[sk_id]
+        r, g, b = pose_limb_color[sk_id] if sk_id < len(pose_limb_color) else palette[0]
+        
+        # 确保索引在有效范围内
+        if (sk[0]-1)*steps >= len(kpts) or (sk[1]-1)*steps >= len(kpts):
+            continue
+            
         pos1 = (int(kpts[(sk[0]-1)*steps]), int(kpts[(sk[0]-1)*steps+1]))
         pos2 = (int(kpts[(sk[1]-1)*steps]), int(kpts[(sk[1]-1)*steps+1]))
+        
         if steps == 3:
+            if (sk[0]-1)*steps+2 >= len(kpts) or (sk[1]-1)*steps+2 >= len(kpts):
+                continue
             conf1 = kpts[(sk[0]-1)*steps+2]
             conf2 = kpts[(sk[1]-1)*steps+2]
             if conf1<0.5 or conf2<0.5:
                 continue
+                
         if pos1[0]%640 == 0 or pos1[1]%640==0 or pos1[0]<0 or pos1[1]<0:
             continue
         if pos2[0] % 640 == 0 or pos2[1] % 640 == 0 or pos2[0]<0 or pos2[1]<0:
             continue
+            
         cv2.line(im, pos1, pos2, (int(r), int(g), int(b)), thickness=2)
 
 
@@ -176,6 +210,12 @@ def output_to_target(output):
 
 
 def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max_size=640, max_subplots=16, kpt_label=True, steps=2, orig_shape=None):
+    # 检测是否为CrowdPose数据集
+    is_crowdpose = False
+    if paths and any('crowdpose' in str(path).lower() for path in paths):
+        is_crowdpose = True
+    elif targets is not None and targets.shape[1] == 34:  # 6 + 14*2 = 34 for CrowdPose
+        is_crowdpose = True
     # Plot image grid with labels
 
     if isinstance(images, torch.Tensor):
@@ -216,7 +256,11 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
             image_targets = targets[targets[:, 0] == i]
             boxes = xywh2xyxy(image_targets[:, 2:6]).T
             classes = image_targets[:, 1].astype('int')
-            labels = image_targets.shape[1] == 40 if kpt_label else image_targets.shape[1] == 6   # labels if no conf column
+            # 根据数据集类型判断标签形状
+            if is_crowdpose:
+                labels = image_targets.shape[1] == 34 if kpt_label else image_targets.shape[1] == 6  # CrowdPose: 6 + 14*2 = 34
+            else:
+                labels = image_targets.shape[1] == 40 if kpt_label else image_targets.shape[1] == 6  # COCO: 6 + 17*2 = 40
             conf = None if labels else image_targets[:, 6]  # check for confidence presence (label vs pred)
             if kpt_label:
                 if conf is None:
