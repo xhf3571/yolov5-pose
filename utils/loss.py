@@ -206,6 +206,27 @@ class ComputeLoss:
         else:
             gain = torch.ones(7, device=targets.device)  # normalized to gridspace gain
         ai = torch.arange(na, device=targets.device).float().view(na, 1).repeat(1, nt)  # same as .repeat_interleave(nt)
+        
+        # 确保targets的形状与gain匹配
+        if self.kpt_label and targets.shape[2] != gain.shape[0] - 1:
+            # 如果targets的形状与gain不匹配，需要调整
+            if self.nkpt == 14 and targets.shape[2] > 35:  # CrowdPose数据集，但targets是COCO格式
+                # 从COCO格式(41列)转换为CrowdPose格式(35列)
+                # 保留类别和bbox (0-4)，以及前14个关键点 (5-32)
+                new_targets = torch.zeros((targets.shape[0], targets.shape[1], 35), device=targets.device)
+                new_targets[:, :, :5] = targets[:, :, :5]  # 类别和bbox
+                new_targets[:, :, 5:33] = targets[:, :, 5:33]  # 前14个关键点
+                new_targets[:, :, 33:] = targets[:, :, 39:]  # anchor索引
+                targets = new_targets
+            elif self.nkpt == 17 and targets.shape[2] < 41:  # COCO数据集，但targets是CrowdPose格式
+                # 从CrowdPose格式(35列)转换为COCO格式(41列)
+                # 这种情况应该不会发生，但为了完整性添加
+                new_targets = torch.zeros((targets.shape[0], targets.shape[1], 41), device=targets.device)
+                new_targets[:, :, :5] = targets[:, :, :5]  # 类别和bbox
+                new_targets[:, :, 5:33] = targets[:, :, 5:33]  # 前14个关键点
+                new_targets[:, :, 39:] = targets[:, :, 33:]  # anchor索引
+                targets = new_targets
+        
         targets = torch.cat((targets.repeat(na, 1, 1), ai[:, :, None]), 2)  # append anchor indices
 
         g = 0.5  # bias
