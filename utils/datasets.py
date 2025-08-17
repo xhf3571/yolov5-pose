@@ -677,17 +677,17 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         # 使用类中定义的关键点数量
         labels_out = torch.zeros((nL, 6+2*self.num_kpts)) if self.kpt_label else torch.zeros((nL, 6))
         if nL:
-                if self.kpt_label:
-                    # 确保labels的形状与labels_out匹配
-                    if labels.shape[1] == 5 + 2*self.num_kpts:  # 正确的形状
-                        labels_out[:, 1:] = torch.from_numpy(labels)
-                    else:
-                        # 如果形状不匹配，只复制可用的部分
-                        labels_out[:, 1:6] = torch.from_numpy(labels[:, :5])  # 复制bbox
-                        min_kpts = min((labels.shape[1]-5)//2, self.num_kpts)
-                        if min_kpts > 0:
-                            for k in range(min_kpts):
-                                labels_out[:, 6+2*k:6+2*(k+1)] = torch.from_numpy(labels[:, 5+2*k:5+2*(k+1)])
+            if self.kpt_label:
+                # 确保labels的形状与labels_out匹配
+                if labels.shape[1] == 5 + 2*self.num_kpts:  # 正确的形状
+                    labels_out[:, 1:] = torch.from_numpy(labels)
+                else:
+                    # 如果形状不匹配，只复制可用的部分
+                    labels_out[:, 1:6] = torch.from_numpy(labels[:, :5])  # 复制bbox
+                    min_kpts = min((labels.shape[1]-5)//2, self.num_kpts)
+                    if min_kpts > 0:
+                        for k in range(min_kpts):
+                            labels_out[:, 6+2*k:6+2*(k+1)] = torch.from_numpy(labels[:, 5+2*k:5+2*(k+1)])
             else:
                 labels_out[:, 1:] = torch.from_numpy(labels[:, :5])
 
@@ -1039,64 +1039,59 @@ def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, s
             # clip
             new[:, [0, 2]] = new[:, [0, 2]].clip(0, width)
             new[:, [1, 3]] = new[:, [1, 3]].clip(0, height)
+            
+            # 处理关键点
+            xy_kpts = None
             if kpt_label:
-                # 检查是否为CrowdPose数据集
-                is_crowdpose = any(x in str(targets) for x in ['CrowdPose', 'crowdpose'])
+                # 使用类中定义的关键点数量
+                num_kpt = self.num_kpts
                 
-                # 根据数据集类型确定关键点数量
-                if is_crowdpose:
-                    num_kpt = 14  # CrowdPose有14个关键点
-                else:
-                    num_kpt = 17  # COCO有17个关键点
+                xy_kpts = np.ones((n * num_kpt, 3))
+                try:
+                    # 计算每个目标的关键点数量
+                    kpts_per_target = (targets.shape[1] - 5) // 2
                     
-                    xy_kpts = np.ones((n * num_kpt, 3))
-                    try:
-                        # 计算每个目标的关键点数量
-                        kpts_per_target = (targets.shape[1] - 5) // 2
-                        
-                        if kpts_per_target == num_kpt:
-                            # 关键点数量匹配，直接重塑
-                            xy_kpts[:, :2] = targets[:,5:].reshape(n*num_kpt, 2)
-                        else:
-                            # 关键点数量不匹配，需要特殊处理
-                            print(f"警告: 关键点数量不匹配 - 目标有 {kpts_per_target} 个关键点，但需要 {num_kpt} 个")
-                            # 创建一个临时数组来存储关键点
-                            temp_kpts = np.zeros((n, num_kpt*2))
-                            # 复制可用的关键点
-                            min_kpts = min(kpts_per_target, num_kpt)
-                            for i in range(n):
-                                for k in range(min_kpts):
-                                    temp_kpts[i, 2*k:2*(k+1)] = targets[i, 5+2*k:5+2*(k+1)]
-                            xy_kpts[:, :2] = temp_kpts.reshape(n*num_kpt, 2)
-                        
-                        xy_kpts = xy_kpts @ M.T # transform
-                        xy_kpts = (xy_kpts[:, :2] / xy_kpts[:, 2:3] if perspective else xy_kpts[:, :2]).reshape(n, num_kpt*2)
-                        
-                        # 创建一个掩码来标识有效的关键点
-                        valid_mask = np.zeros((n, num_kpt*2), dtype=bool)
+                    if kpts_per_target == num_kpt:
+                        # 关键点数量匹配，直接重塑
+                        xy_kpts[:, :2] = targets[:,5:].reshape(n*num_kpt, 2)
+                    else:
+                        # 关键点数量不匹配，需要特殊处理
+                        print(f"警告: 关键点数量不匹配 - 目标有 {kpts_per_target} 个关键点，但需要 {num_kpt} 个")
+                        # 创建一个临时数组来存储关键点
+                        temp_kpts = np.zeros((n, num_kpt*2))
+                        # 复制可用的关键点
+                        min_kpts = min(kpts_per_target, num_kpt)
                         for i in range(n):
-                            for k in range(min(kpts_per_target, num_kpt)):
-                                if targets[i, 5+2*k] != 0 or targets[i, 5+2*k+1] != 0:
-                                    valid_mask[i, 2*k] = True
-                                    valid_mask[i, 2*k+1] = True
-                        
-                        # 将无效关键点设为0
-                        xy_kpts[~valid_mask] = 0
-                        
-                        x_kpts = xy_kpts[:, list(range(0,num_kpt*2,2))]
-                        y_kpts = xy_kpts[:, list(range(1,num_kpt*2,2))]
-                    except ValueError as e:
-                        print(f"重塑错误: {e}, targets.shape={targets.shape}, n={n}, num_kpt={num_kpt}")
-                        # 创建一个全零的关键点数组作为回退
-                        xy_kpts = np.zeros((n, num_kpt*2))
-                        x_kpts = np.zeros((n, num_kpt))
-                        y_kpts = np.zeros((n, num_kpt))
-                
-                # 对于任何数据集，将超出图像边界的关键点设为0
-                x_kpts[np.logical_or.reduce((x_kpts < 0, x_kpts > width, y_kpts < 0, y_kpts > height))] = 0
-                y_kpts[np.logical_or.reduce((x_kpts < 0, x_kpts > width, y_kpts < 0, y_kpts > height))] = 0
-                xy_kpts[:, list(range(0, num_kpt*2, 2))] = x_kpts
-                xy_kpts[:, list(range(1, num_kpt*2, 2))] = y_kpts
+                            for k in range(min_kpts):
+                                temp_kpts[i, 2*k:2*(k+1)] = targets[i, 5+2*k:5+2*(k+1)]
+                        xy_kpts[:, :2] = temp_kpts.reshape(n*num_kpt, 2)
+                    
+                    xy_kpts = xy_kpts @ M.T # transform
+                    xy_kpts = (xy_kpts[:, :2] / xy_kpts[:, 2:3] if perspective else xy_kpts[:, :2]).reshape(n, num_kpt*2)
+                    
+                    # 创建一个掩码来标识有效的关键点
+                    valid_mask = np.zeros((n, num_kpt*2), dtype=bool)
+                    for i in range(n):
+                        for k in range(min(kpts_per_target, num_kpt)):
+                            if targets[i, 5+2*k] != 0 or targets[i, 5+2*k+1] != 0:
+                                valid_mask[i, 2*k] = True
+                                valid_mask[i, 2*k+1] = True
+                    
+                    # 将无效关键点设为0
+                    xy_kpts[~valid_mask] = 0
+                    
+                    x_kpts = xy_kpts[:, list(range(0,num_kpt*2,2))]
+                    y_kpts = xy_kpts[:, list(range(1,num_kpt*2,2))]
+                    
+                    # 对于任何数据集，将超出图像边界的关键点设为0
+                    x_kpts[np.logical_or.reduce((x_kpts < 0, x_kpts > width, y_kpts < 0, y_kpts > height))] = 0
+                    y_kpts[np.logical_or.reduce((x_kpts < 0, x_kpts > width, y_kpts < 0, y_kpts > height))] = 0
+                    xy_kpts[:, list(range(0, num_kpt*2, 2))] = x_kpts
+                    xy_kpts[:, list(range(1, num_kpt*2, 2))] = y_kpts
+                except ValueError as e:
+                    print(f"重塑错误: {e}, targets.shape={targets.shape}, n={n}, num_kpt={num_kpt}")
+                    # 创建一个全零的关键点数组作为回退
+                    xy_kpts = np.zeros((n, num_kpt*2))
 
         # filter candidates
         i = box_candidates(box1=targets[:, 1:5].T * s, box2=new.T, area_thr=0.01 if use_segments else 0.10)
