@@ -1,0 +1,14 @@
+# Train/val/test sets
+train: /home/disk/xuhaifeng/edgeai-yolov5-yolo-pose/dataset/crowdpose/train
+val: /home/disk/xuhaifeng/edgeai-yolov5-yolo-pose/dataset/crowdpose/val
+test: /home/disk/xuhaifeng/edgeai-yolov5-yolo-pose/dataset/crowdpose/test
+
+# Number of classes (1 for CrowdPose)
+nc: 1
+
+# Keypoints
+kpt_shape: [14, 3]  # 14 keypoints, each with x,y,visibility
+flip_idx: [1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 12, 13]  # left-right symmetric pairs
+
+# Class names
+names: ['person']
